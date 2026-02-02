@@ -1,5 +1,6 @@
 package frc.robot;
 
+// === IMPORTAÇÕES ===
 import edu.wpi.first.wpilibj.TimedRobot;
 import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
 import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
@@ -27,20 +28,24 @@ public class Robot extends TimedRobot {
     private final SparkMax LeftNEO1   = new SparkMax(4, MotorType.kBrushed);
     private final SparkMax RightNEO2 = new SparkMax(3, MotorType.kBrushed);
     private final SparkMax LeftNEO2  = new SparkMax(5, MotorType.kBrushed);
-
-    private final SparkMaxConfig driveConfig = new SparkMaxConfig();
-    private final Timer tempoTimer = new Timer();
-    private final XboxController controller1 = new XboxController(0);
-
-    // === BRAÇO ===
-    private final SparkMax armMotor = new SparkMax(6, MotorType.kBrushless);
+    
+    // === GARRA ===
+    private final SparkMax clawMotor = new SparkMax(6, MotorType.kBrushed);
     private final SparkMaxConfig armConfig = new SparkMaxConfig();
-    private RelativeEncoder armEncoder;
+    private RelativeEncoder clawEncoder;
+
+    // === INTAKE ===
+    private final SparkMax intakeMotor = new SparkMax(7, MotorType.kBrushed);
 
     // === SHOOTER ===
     private final SparkMax shooter1 = new SparkMax(2, MotorType.kBrushed);
     private final SparkMaxConfig shooterConfig = new SparkMaxConfig();
     private double shooterPower = -0.65;
+
+    // === OUTROS ===
+    private final SparkMaxConfig driveConfig = new SparkMaxConfig();
+    private final Timer tempoTimer = new Timer();
+    private final XboxController controller1 = new XboxController(0);
 
 
     // ==================== ROBOT INIT ====================
@@ -60,12 +65,14 @@ public class Robot extends TimedRobot {
         RightNEO2.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
         LeftNEO2.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
-        // === ARM ===
+        // === GARRA ===
         armConfig.idleMode(IdleMode.kBrake);
-        armMotor.configure(armConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        armEncoder = armMotor.getEncoder();
+        armConfig.smartCurrentLimit(35);
+        clawMotor.configure(armConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+        clawEncoder = clawMotor.getEncoder();
+        clawEncoder.setPosition(0);
 
-        System.out.println("Posição inicial do braço: " + armEncoder.getPosition());
+        System.out.println("Posição inicial da Garra: " + clawEncoder.getPosition());
 
         // === SHOOTER ===
         shooterConfig.idleMode(IdleMode.kCoast);
@@ -94,13 +101,13 @@ public class Robot extends TimedRobot {
     @Override
     public void teleopPeriodic() {
 
-        // === Joystick ===
+        // === JOYSTICK ===
         double eixoY = applyDeadband(-controller1.getLeftX(), 0.1);
         double eixoX = applyDeadband(controller1.getLeftY(), 0.1);
 
-        double speedMultiplier = controller1.getRightBumperButton() ? 1.0 : 0.5;
+        double speedMultiplier = controller1.getLeftBumperButton() ? 1.0 : 0.5;
 
-        // === Arcade Drive ===
+        // === ARCADE DRIVE===
         double leftSpeed  = clamp((eixoY + eixoX) * speedMultiplier, -0.7, 0.7);
         double rightSpeed = clamp((eixoY - eixoX) * speedMultiplier, -0.7, 0.7);
 
@@ -109,32 +116,69 @@ public class Robot extends TimedRobot {
         RightNEO1.set(rightSpeed);
         RightNEO2.set(rightSpeed);
 
-        // === Shooter ===
+        // === SHOOTER ===
         shooterPower = SmartDashboard.getNumber("Shooter Power",  -0.65);
 
-        if (controller1.getXButton()) {
+        if (controller1.getRightTriggerAxis() > 0.1) {
             shooter1.set(shooterPower);
         } else {
             shooter1.set(0);
         }
 
-        // === ARM MANUAL ===
-        double pos = armEncoder.getPosition();
-        boolean subir = controller1.getAButton();
-        boolean descer = controller1.getYButton();
+        // === GARRA ===
+        double pos = clawEncoder.getPosition();
+        boolean fechar = controller1.getAButton();
+        boolean abrir = controller1.getYButton();
+        boolean hangmode = controller1.getRightBumperButton();
 
-        double limiteSuperior = 3.0;
-        double limiteInferior = -3.0;
+        double limiteFechado = 2.5;
+        double limiteAberto = -2.5;
+
+        double corrente = clawMotor.getOutputCurrent();
+        double correnteHang = 34;
+        double correnteAlvo = 25;
+
+        double powerFechar = 0.9;
+        double powerAbrir = -0.6;
+        double powerFirme = 0.25;
+        double powerhang = 0.3;
+
         double power = 0;
 
-        if (subir && pos < limiteSuperior) power = 0.15;
-        else if (descer && pos > limiteInferior) power = -0.05;
-
-        armMotor.set(power);
-
-        System.out.printf("Braço | pos: %.3f | power: %.3f%n", pos, power);
+if (hangmode) {
+    if (corrente < correnteHang && pos < limiteFechado){
+        power = powerhang;
     }
+} else {
+    power = powerFirme;
+}
 
+        if (fechar && pos < limiteFechado) power = powerFechar;
+        else if (abrir && pos > limiteAberto) power = powerAbrir;
+
+        else {
+            if (corrente < correnteAlvo) {
+                power = powerFirme;
+            } else {
+                power = 0.1;
+            }
+        }
+
+        clawMotor.set(power);
+
+        System.out.printf("Garra  | HANG: %b | pos: %.2f | power: %.1fA", hangmode, pos, corrente, power);
+    
+    // === INTAKE/OUTTAKE ===
+    if (controller1.getBButton()) {
+        intakeMotor.set(0.8);
+    } else if (controller1.getXButton()) {
+        intakeMotor.set(-0.8);
+    } else {
+        intakeMotor.set(0);
+    }
+    
+    
+    }
 
     // ==================== UTIL ====================
     private double applyDeadband(double val, double lim) {
