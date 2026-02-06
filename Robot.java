@@ -28,13 +28,6 @@ public class Robot extends TimedRobot {
     // === DRIVE MOTORS ===
     private final SparkMax RightNEO1 = new SparkMax(1, MotorType.kBrushed);
     private final SparkMax LeftNEO1  = new SparkMax(4, MotorType.kBrushed);
-    private final SparkMax RightNEO2 = new SparkMax(3, MotorType.kBrushed);
-    private final SparkMax LeftNEO2  = new SparkMax(5, MotorType.kBrushed);
-
-    // === GARRA ===
-    private final SparkMax clawMotor = new SparkMax(6, MotorType.kBrushed);
-    private final SparkMaxConfig armConfig = new SparkMaxConfig();
-    private RelativeEncoder clawEncoder;
 
     // === PID GARRA ===
     private double armTarget = 0;
@@ -43,18 +36,17 @@ public class Robot extends TimedRobot {
     private final double kP_arm = 0.6;
     private final double kD_arm = 0.05;
 
-    // === INTAKE ===
-    private final SparkMax intakeMotor = new SparkMax(7, MotorType.kBrushed);
-
-    // === SHOOTER (SEM ENCODER) ===
-    private final SparkMax shooter1 = new SparkMax(2, MotorType.kBrushed);
-    private final SparkMax shooter2 = new SparkMax(8, MotorType.kBrushed);
+    // === SHOOTER ===
+    private final SparkMax shooter1 = new SparkMax(7, MotorType.kBrushed);
     private final SparkMaxConfig shooterConfig = new SparkMaxConfig();
-    private double shooterPower = -0.65;
+    private double shooterPower = -0.9;
+
+    // ===INDEXTER ===
+    private final SparkMax Indexter = new SparkMax(2, MotorType.kBrushed );
 
     // === NAVx2 9-EIXOS ===
     private AHRS navx;
-    private double lastYawError = 0;
+    private double lastYawError = 0; 
 
     // === OUTROS ===
     private final SparkMaxConfig driveConfig = new SparkMaxConfig();
@@ -65,35 +57,25 @@ public class Robot extends TimedRobot {
     @Override
     public void robotInit() {
 
-        // Chooser
+    // === CHOOSER ===
         m_chooser.setDefaultOption("Default Auto", kDefaultAuto);
         m_chooser.addOption("My Auto", kCustomAuto);
         SmartDashboard.putData("Auto choices", m_chooser);
 
-        // === DRIVE CONFIG ===
+    // === DRIVE CONFIG ===
         driveConfig.idleMode(IdleMode.kBrake).inverted(false);
 
         RightNEO1.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
         LeftNEO1.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        RightNEO2.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        LeftNEO2.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
-        // === GARRA ===
-        armConfig.idleMode(IdleMode.kBrake);
-        armConfig.smartCurrentLimit(35);
-        clawMotor.configure(armConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
-        clawEncoder = clawMotor.getEncoder();
-        clawEncoder.setPosition(0);
-
-        // === SHOOTER ===
+    // === SHOOTER ===
         shooterConfig.idleMode(IdleMode.kCoast);
         shooter1.configure(shooterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-        shooter2.configure(shooterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
 
         SmartDashboard.putNumber("Shooter Power", shooterPower);
 
-        // === NAVx2 9-EIXOS ===
+    // === NAVx2 9-EIXOS ===
         navx = new AHRS(AHRS.NavXComType.kMXP_SPI);
 
         System.out.println("=== Sistema iniciado ===");
@@ -115,7 +97,7 @@ public class Robot extends TimedRobot {
     public void teleopPeriodic() {
 
         // === JOYSTICK ===
-        double eixoY = applyDeadband(-controller1.getLeftY(), 0.1);
+        double eixoY = -applyDeadband(controller1.getLeftY(), 0.1);
         double eixoX = applyDeadband(controller1.getLeftX(), 0.1);
         double speedMultiplier = controller1.getLeftBumper() ? 1.0 : 0.5;
 
@@ -124,57 +106,60 @@ public class Robot extends TimedRobot {
         double rightSpeed = clamp((eixoY - eixoX) * speedMultiplier, -0.7, 0.7);
 
         // === NAVx2 9-EIXOS/PID ===
+        double turnPower = 0;
         double yaw = navx.getYaw();
-        double yawError = -yaw;
-        double yawDerivative = yawError - lastYawError;
-
         double kP_turn = 0.02;
         double kD_turn = 0.003;
+        
+        if (Math.abs(eixoX) < 0.05) {
+        
+            double yawError = -yaw;
+            double yawDerivative = yawError - lastYawError;
+        
+            //turnPower = (kP_turn * yawError) + (kD_turn * yawDerivative);
+            //turnPower = clamp(turnPower, -0.4, 0.4);
 
-        double turnPower = (kP_turn * yawError) + (kD_turn * yawDerivative);
-        turnPower = clamp(turnPower, -0.4, 0.4);
-
-        lastYawError = yawError;
-
+            turnPower = 0;
+        
+            lastYawError = yawError;
+        
+        }
+        
         LeftNEO1.set(leftSpeed + turnPower);
-        LeftNEO2.set(leftSpeed + turnPower);
         RightNEO1.set(rightSpeed - turnPower);
-        RightNEO2.set(rightSpeed - turnPower);
 
-        // === SHOOTER ===
-        shooterPower = SmartDashboard.getNumber("Shooter Power", -0.65);
+        // === SHOOTER/INTAKE/OUTTAKE ===
+        double shooterCmd = 0;
 
         if (controller1.getRightTriggerAxis() > 0.1) {
-            shooter1.set(shooterPower);
-            shooter2.set(shooterPower);
-        } else {
-            shooter1.set(0);
-            shooter2.set(0);
-        }
+           shooterCmd = shooterPower;
+              }
 
-        // === GARRA ===
-        double pos = clawEncoder.getPosition();
+        else if (controller1.getBButton()) {
+             shooterCmd = -0.45;
+              }
 
-        if (controller1.getAButton()) armTarget = 2.5;
-        if (controller1.getYButton()) armTarget = -2.5;
+        else if (controller1.getXButton()) {
+             shooterCmd = 0.45;
+              }
 
-        double armError = armTarget - pos;
-        double armDerivative = armError - armLastError;
-
-        double armPower = (kP_arm * armError) + (kD_arm * armDerivative);
-        armPower = clamp(armPower, -0.8, 0.8);
-
-        clawMotor.set(armPower);
-        armLastError = armError;
-
-        // === INTAKE/OUTTAKE ===
+        shooter1.set(shooterCmd);
+      
+        // === INDEXTER ===
         if (controller1.getBButton()) {
-            intakeMotor.set(0.8);
+            Indexter.set(-0.9);
         } else if (controller1.getXButton()) {
-            intakeMotor.set(-0.8);
+            Indexter.set(0.43);
         } else {
-            intakeMotor.set(0);
+            Indexter.set(0);
         }
+    }
+
+  
+    @Override
+    public void teleopInit() {
+        navx.zeroYaw();
+        lastYawError = 0;
     }
 
     // ==================== UTIL ====================
@@ -186,7 +171,7 @@ public class Robot extends TimedRobot {
         return Math.max(min, Math.min(max, v));
     }
 
-    // ==================== EMPTY ====================
+    // ==================== VAZIO ====================
     @Override public void disabledInit() {}
     @Override public void disabledPeriodic() {}
     @Override public void testInit() {}
