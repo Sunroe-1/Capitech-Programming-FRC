@@ -1,0 +1,220 @@
+package org.firstinspires.ftc.teamcode;
+
+// FIX 1: Import all necessary hardware classes
+import com.qualcomm.robotcore.eventloop.opmode.OpMode;
+import com.qualcomm.robotcore.eventloop.opmode.TeleOp;
+import com.qualcomm.robotcore.hardware.DcMotor;
+import com.qualcomm.robotcore.hardware.DcMotorEx; // Import DcMotorEx
+import com.qualcomm.robotcore.hardware.IMU;
+import com.qualcomm.hardware.rev.RevHubOrientationOnRobot;
+import org.firstinspires.ftc.robotcore.external.navigation.AngleUnit;
+
+@TeleOp(name = "TeleOpTeste1_Final", group = "TeleOp")
+public class TeleOpTeste1 extends OpMode {
+    
+    // 1. HARDWARE DECLARATIONS
+    private DcMotor frontRight, backRight, frontLeft, backLeft;
+    private DcMotorEx Intake, Shooter; // CORRECT: Use DcMotorEx for velocity features
+    private IMU imu;
+
+    // 2. CONSTANTS (Ticks Per Revolution - TPR)
+    private static final double SHOOTER_TPR = 28; // 20:1 UltraPlanetary
+    private static final double INTAKE_TPR = 288.0;   // 72:1 Core Hex
+    private static final double TARGET_SHOOTER_RPM = -3200.0;
+    private static final double RPM_TOLERANCE = 50.0; // +/- 50 RPM tolerance
+
+    // 3. STATE VARIABLES
+    private int shooterState = 0; // 0=OFF, 1=Speed A (0.8), 2=Speed B (0.7)
+    private boolean wasLeftTriggerPressed = false; 
+    private boolean wasAButtonPressed = false; 
+    private boolean wasBButtonPressed = false; 
+    private boolean wasXButtonPressed = false; 
+
+    // --- INIT ---
+    @Override
+    public void init() {
+        // Map motors using DcMotorEx for velocity control on subsystems
+        Intake = hardwareMap.get(DcMotorEx.class, "Intake");
+        Shooter = hardwareMap.get(DcMotorEx.class, "Shooter");
+        
+        // Map drive motors using standard DcMotor (or DcMotorEx, if you prefer)
+        frontRight = hardwareMap.get(DcMotor.class, "frontRight");
+        backRight = hardwareMap.get(DcMotor.class, "backRight");
+        frontLeft = hardwareMap.get(DcMotor.class, "frontLeft");
+        backLeft = hardwareMap.get(DcMotor.class, "backLeft");
+
+        // Set directions
+        frontLeft.setDirection(DcMotor.Direction.REVERSE);
+        backLeft.setDirection(DcMotor.Direction.REVERSE);
+
+        // Set motors to run with encoders (essential for velocity control)
+        frontLeft.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        // ... set all drive motors to RUN_USING_ENCODER ...
+        Intake.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+        Shooter.setMode(DcMotor.RunMode.RUN_USING_ENCODER);
+
+        // Set zero power behavior
+        frontLeft.setZeroPowerBehavior(DcMotor.ZeroPowerBehavior.BRAKE);
+        // ... set all drive motors to BRAKE ...
+
+        // Initialize IMU
+        imu = hardwareMap.get(IMU.class, "imu");
+        RevHubOrientationOnRobot revOrientation = new RevHubOrientationOnRobot(
+                RevHubOrientationOnRobot.LogoFacingDirection.UP,
+                RevHubOrientationOnRobot.UsbFacingDirection.FORWARD
+        );
+        imu.initialize(new IMU.Parameters(revOrientation));
+        
+        telemetry.addData("Status", "Initialization Complete");
+        telemetry.update();
+    }
+
+    // --- START ---
+    @Override
+    public void start() {
+        imu.resetYaw();
+    }
+
+    // --- LOOP ---
+    @Override
+    public void loop() {
+        // A. DRIVE TRAIN CONTROL
+        final double DEADBAND_THRESHOLD = 0.05;
+        double robotForward = gamepad1.right_stick_y;
+        double robotStrafe = -gamepad1.right_stick_x;
+        double robotRotate = -gamepad1.left_stick_x; 
+
+        if (Math.abs(robotForward) < DEADBAND_THRESHOLD) { robotForward = 0.0; }
+        if (Math.abs(robotStrafe) < DEADBAND_THRESHOLD) { robotStrafe = 0.0; }
+        if (Math.abs(robotRotate) < DEADBAND_THRESHOLD) { robotRotate = 0.0; }
+        
+        drive(robotForward, robotStrafe, robotRotate);
+
+        // B. INPUTS & EDGE DETECTION
+        boolean isLeftTriggerPressed = gamepad1.left_trigger > 0.5;
+        boolean isAButtonPressed = gamepad1.a;
+        boolean isLeftBumperPressed = gamepad1.left_bumper;
+        boolean isBButtonPressed = gamepad1.b;
+        boolean isXButtonPressed = gamepad1.x;
+
+        // C. SHOOTER STATE TRANSITION LOGIC
+        if (isAButtonPressed && !wasAButtonPressed) {
+            shooterState = 0; // OFF
+        } 
+        else if (isLeftTriggerPressed && !wasLeftTriggerPressed) {
+            if (shooterState == 0) {
+                shooterState = 1; // SPEED_A
+            }
+        }
+        else if (isBButtonPressed && !wasBButtonPressed) {
+            if (shooterState == 1) {
+                shooterState = 2; // SPEED_B
+            }
+        }
+        else if (isXButtonPressed && !wasXButtonPressed) {
+            if (shooterState == 2) {
+                shooterState = 1; // SPEED_A
+            }
+        }
+        
+        // D. SHOOTER MOTOR POWER APPLICATION (Unified Control)
+        if (isLeftBumperPressed) {
+            Shooter.setPower(0.8); // Override: Reverse (Spit out)
+        } 
+        else if (shooterState == 1) {
+            Shooter.setPower(-0.8); // SPEED_A
+        } 
+        else if (shooterState == 2) {
+            Shooter.setPower(-0.7); // SPEED_B
+        } 
+        else { 
+            Shooter.setPower(0.0); // OFF
+        }
+
+        // E. INTAKE MOTOR CONTROL (Simple)
+        if (gamepad1.right_trigger > 0.1) {
+            Intake.setPower(0.8);
+        } 
+        else if (gamepad1.right_bumper) {
+            Intake.setPower(-0.8);
+        } 
+        else {
+            Intake.setPower(0.0);
+        }
+
+        // F. UPDATE STATE VARIABLES
+        wasBButtonPressed = isBButtonPressed;
+        wasXButtonPressed = isXButtonPressed;
+        wasLeftTriggerPressed = isLeftTriggerPressed;
+        wasAButtonPressed = isAButtonPressed;
+
+        // G. ENCODER READINGS & CALCULATIONS
+        // The getVelocity() method of DcMotorEx gives Ticks/Second
+        double shooterVelocity_TPS = Shooter.getVelocity();
+        
+        // Calculate RPM: (Ticks/Sec / Ticks/Rev) * 60 Sec/Min
+        double shooterRPM = (shooterVelocity_TPS / SHOOTER_TPR) * 60.0;
+        
+        // Calculate RPS: (Ticks/Sec / Ticks/Rev)
+        double shooterRPS = shooterVelocity_TPS / SHOOTER_TPR; // RPS
+        
+        double shooterTicks = Shooter.getCurrentPosition(); // Current Position (Ticks)
+
+        // H. READY STATUS (For color-changing telemetry)
+        boolean isShooterReady = (shooterRPM >= (TARGET_SHOOTER_RPM - RPM_TOLERANCE))
+                                 && (shooterState != 0); // Must be spinning AND intended to be ON
+
+        // The telemetry changes color by using a formatting tag, usually interpreted by the SDK.
+        // ** (Bold) or * (Italic) often triggers color changes based on values.
+        String readyStatus = isShooterReady ? 
+                             "**READY (" + (int)TARGET_SHOOTER_RPM + " RPM)**" : 
+                             "Warming Up (" + (int)TARGET_SHOOTER_RPM + " RPM)";
+
+
+        // I. TELEMETRY DISPLAY
+        
+        telemetry.addData("--- SHOOTER STATUS ---", "");
+        // Missing Element: Color-Changing Telemetry
+        telemetry.addData("Shooter Status", readyStatus); 
+        telemetry.addData("Target RPM", TARGET_SHOOTER_RPM);
+        telemetry.addData("Current RPM", "%.0f", shooterRPM);
+        telemetry.addData("Current RPS", "%.2f", shooterRPS);
+        telemetry.addData("Current Ticks", shooterTicks);
+        telemetry.addData("Meow meow, I'm a cat! :3", ""); //just for fun
+        telemetry.addData("--- SUBSYSTEMS ---", "");
+        telemetry.addData("Intake Power", Intake.getPower());
+        telemetry.addData("Shooter State (0/1/2)", shooterState);
+        telemetry.addData("Yaw (Degrees)", "%.2f", imu.getRobotYawPitchRollAngles().getYaw(AngleUnit.DEGREES));
+
+        
+        telemetry.update();
+    }
+
+    /**
+     * Drives the robot with the given forward, strafe, and rotate values.
+     */
+    public void drive(double forward, double strafe, double rotate) {
+        // Mecanum drive kinematics and power setting (code remains the same)
+        double frontLeftPower = forward + strafe + rotate;
+        double frontRightPower = forward - strafe - rotate;
+        double backLeftPower = forward - strafe + rotate;
+        double backRightPower = forward + strafe - rotate;
+
+        double max = Math.abs(frontLeftPower);
+        max = Math.max(max, Math.abs(frontRightPower));
+        max = Math.max(max, Math.abs(backLeftPower));
+        max = Math.max(max, Math.abs(backRightPower));
+
+        if (max > 0.8) {
+            frontLeftPower /= max;
+            frontRightPower /= max;
+            backLeftPower /= max;
+            backRightPower /= max;
+        }
+
+        frontLeft.setPower(frontLeftPower);
+        frontRight.setPower(frontRightPower);
+        backLeft.setPower(backLeftPower);
+        backRight.setPower(backRightPower);
+    }
+}
