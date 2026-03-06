@@ -1,433 +1,734 @@
-package frc.robot; //Pacote de importações para FRC
+    //===============================IMPORTS===============================//
+    package frc.robot;//Pacote que lista os códigos exclusivamente para robôs da FRC
 
-// === IMPORTAÇÕES ===
-import edu.wpi.first.wpilibj.TimedRobot; //Importação para o robô executar seu código em 20ms
-import edu.wpi.first.wpilibj.smartdashboard.SendableChooser; //Importação para decidir qual versão do autônomo usar
-import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard; //Importação para mostrar informações do robô em tempo real
-import edu.wpi.first.wpilibj.Timer; //Importação para o robô possuir um tempo determinado, útil para autônomo
-import edu.wpi.first.wpilibj.XboxController; //Importação para o robô utilizar o controle, útil no TeleOp
-import edu.wpi.first.wpilibj.Counter; //Importação para identificação de período de som
-import edu.wpi.first.wpilibj.DigitalOutput; //Importação para utilizar meios digitais implementados no RoboRIO
-import edu.wpi.first.math.MathUtil;
-import edu.wpi.first.math.controller.PIDController;
-import edu.wpi.first.math.geometry.Transform2d;
-import edu.wpi.first.wpilibj2.command.SubsystemBase;
 
-import com.revrobotics.spark.SparkMax; //Importação para utilizar SparkMax
-import com.revrobotics.spark.SparkLowLevel.MotorType; //Importação para decidir qual motor vai ser (Brushed ou Brusheless)
-import com.revrobotics.spark.SparkBase.ResetMode; //Importação para o robô continuar com a programação ou voltar ao padrão
-import com.revrobotics.spark.SparkBase.PersistMode; //Importação para o código ficar salvo na memória ao invés de perder
-import com.revrobotics.spark.config.SparkMaxConfig; // Importação para criar e aplicar configurações no SparkMax
-import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;  // Importação para definir o modo de parada do motor (Brake ou Coast)
-import org.opencv.core.Mat; //Importação para utilizar o OpenCV, muito utilizado na Telemetria para calcular distância
+    //Importações da biblioteca da WPIlib
+    import edu.wpi.first.wpilibj.TimedRobot;
+    import edu.wpi.first.wpilibj2.command.Command;
+    import edu.wpi.first.wpilibj2.command.CommandScheduler;
+    import edu.wpi.first.wpilibj.DigitalInput;
+    import edu.wpi.first.wpilibj.RobotState;
+    import edu.wpi.first.wpilibj.smartdashboard.SendableChooser;
+    import edu.wpi.first.wpilibj.smartdashboard.SmartDashboard;
+    import edu.wpi.first.wpilibj.Timer;
+    import edu.wpi.first.wpilibj.XboxController;
+    import edu.wpi.first.math.util.Units; 
+    import static edu.wpi.first.units.Units.Newton;//Import que permite a utilizaçao da unidade de medida em ''Newtons''
 
-import org.photonvision.PhotonCamera;
-import org.photonvision.targeting.PhotonPipelineResult;
-import org.photonvision.targeting.PhotonTrackedTarget;
 
-public class TeleBee extends TimedRobot { //Classe para definição de partes, motores e sensores
+    //Importações da Rev para utilização dos SparkMax
+    import com.revrobotics.spark.SparkMax;
+    import com.revrobotics.spark.SparkLowLevel.MotorType;
+    import com.revrobotics.spark.SparkBase.ResetMode;
+    import com.revrobotics.spark.SparkBase.PersistMode;
+    import com.revrobotics.spark.config.SparkBaseConfig;
+    import com.revrobotics.spark.config.SparkMaxConfig;
+    import com.revrobotics.spark.config.SparkBaseConfig.IdleMode;
 
-    // === AUTONOMOUS CHOOSER ===
-    private static final String kDefaultAuto = "Default"; //Define o modo base do autonômo
-    private static final String kCustomAuto = "My Auto"; //Define o modo customizado do autonômo
-    private String m_autoSelected; //Define qual modo do autonômo será escolhido
-    private final SendableChooser<String> m_chooser = new SendableChooser<>();  //Definição de SmartDashboard no autonômo
+    import org.opencv.aruco.EstimateParameters;
 
-    // === DRIVE MOTORS ===
-    private final SparkMax RightNEO1 = new SparkMax(2, MotorType.kBrushed); //Definição do motor e sparkmax do lado direito
-    private final SparkMax LeftNEO1  = new SparkMax(1, MotorType.kBrushed); //Definição do motor e sparkmax do lado esquerdo
+    //Imports do photonvision
 
-    // === GARRA E DERIVATIVO ===
-    private final SparkMax Claw = new SparkMax(8, MotorType.kBrushed);
-    private final SparkMaxConfig ClawConfig = new SparkMaxConfig();
+    import org.photonvision.PhotonCamera; // Classe principal para a câmera
+    import org.photonvision.targeting.PhotonPipelineResult; // Resultado do processamento
+    import org.photonvision.targeting.PhotonTrackedTarget; // Dados de um alvo específico
+    import org.photonvision.PhotonUtils; // (Opcional) Útil para cálculos de distância
+    import edu.wpi.first.math.interpolation.InterpolatingDoubleTreeMap;
 
-    private double ClawTargetPower = 0;
-    private double ClawLastPower = 0;
-    private double kD_Claw = 0.5;
+    import edu.wpi.first.wpilibj.DriverStation;
+    import java.util.Optional;
+    import edu.wpi.first.wpilibj.DriverStation.Alliance;
 
-    // === SENSOR AJ-SR04M-2 (ULTRASSÔNICO) ===
-    private final DigitalOutput Trig = new DigitalOutput(0); //Definição para utilizar meios digitais implementados no RoboRIO
-    private final Counter Echo = new Counter(1); //Definição para identificação de período de som
-    private double DistanceFilter = 0; //Definição do filtro de distância
-    private double ShooterPercentage = 0; //Definição da porcentagem de acerto do shooter
+    import com.revrobotics.RelativeEncoder;//import da Rev para utiização do encoder
 
-    // === SHOOTER ===
-    private final SparkMax shooter1 = new SparkMax(4, MotorType.kBrushed); //Definição de motor do Shooter
-    private final SparkMaxConfig shooterConfig = new SparkMaxConfig(); //Definição da configuração de motor do Shooter
-    private double shooterPower1 = 0.4; //Definição da potência do shooter para longa distância
-    private double shooterPower2 = 0.4; //Definição da potência do shooter para curta distância
+    import com.studica.frc.AHRS;//import da biblioteca utilizada para o sensor NAVx2
+
+
+    public class Robot extends TimedRobot {
+
+    // --- VARIÁVEIS DE VISÃO ---
+    PhotonCamera camera = new PhotonCamera("Fifine_K420");
+    private final InterpolatingDoubleTreeMap shotMap = new InterpolatingDoubleTreeMap();
+
+    // Variáveis de calibração baseadas nos seus dados
+    final double ALTURA_CAMERA_METROS = 0.53; 
+    final double ALTURA_HUB_METROS = 1.12;
+    final double ALTURA_TORRE_METROS = 0.55;
+    final double ANGULO_MONTAGEM_RADIANOS = Units.degreesToRadians(0.0); // Mude se a câmera estiver inclinada
+
+    // Controle de estado
+    private boolean jaAlinhou = false;
+
+    private static final String kDefaultAuto = "Normal"; // saída 0
+
+    private static final String kCustomAuto = "Auto 1"; // saida 1
+
+    private static final String kAuto2 = "Auto 2"; // saída 2
+
+    private static final String kAuto3 = "Auto 3"; // saída 3
+
+    private static final String kAuto4 = "Auto 4"; // saída 4
+
+    private static final String kAuto5 = "Auto 5"; // saída 5
+
+    private static final String kAutoProtoEsp = "Normal Esp"; // saída 6
+
+    private static final String kAuto7 = "Auto 7"; // saída 7
+
+    private static final String kAuto8 = "Auto 8"; // saida 8
+
+    private static final String kAuto9 = "Auto 9"; // saida 9
+
+    private static final String kAuto10 = "Auto 10";
+
+    
+    private String m_autoSelect; // Guarda qual autônomo foi escolhido no dashboard
+
+    private final SendableChooser<String> m_chooser = new SendableChooser<>(); // Menu no dashboard para selecionar o autônomo
+
+    Timer timer = new Timer();  // Timer para controle de tempo
+
+    DigitalInput botao = new DigitalInput(1);  // Entrada digital
+
+    private Command m_autonomousCommand; // Comando que roda durante o autônomo
+
+
+    private final RobotContainer m_robotContainer;// Container onde ficam subsistemas e comandos
+    
         
-    // === INTAKE ===
-    private final SparkMax intake = new SparkMax(6, MotorType.kBrushed); //Definição do motor do intake e seu sparkmax
-    private final SparkMaxConfig intakeConfig = new SparkMaxConfig(); //Definição de configuração do motor do intake
+    private final SparkMaxConfig leftConfig = new SparkMaxConfig();  // Configurações esquerda e direita 
+    private final SparkMaxConfig rightConfig = new SparkMaxConfig(); //dos motores SparkMax
+    
+    private final SparkMaxConfig shooterConfig = new SparkMaxConfig(); //Configuração do motor do Shooter
 
-    // === INDEXTER ===
-    private final SparkMax indexter = new SparkMax(3, MotorType.kBrushless); //Definição do motor do indexter da esquerda e seu sparkmax
-    private final SparkMax indexter2 = new SparkMax(5, MotorType.kBrushed); //Definição do motor indexter de cima e seu sparkmax
-    private final SparkMax esteira = new SparkMax(7, MotorType.kBrushed);
-    private final SparkMaxConfig indexterConfig = new SparkMaxConfig(); //Definição da configuração
+    private final SparkMaxConfig intakeConfig = new SparkMaxConfig(); //Configuração do motor do Intake
 
-    // === TELEMTRY ===
-    PhotonCamera camera = new PhotonCamera("Brutal");
-    PIDController rotPID = new PIDController(0.02, 0, 0.001);
-    PIDController distPID = new PIDController(0.8, 0, 0.05);
+    private final SparkMaxConfig indexPConfig = new SparkMaxConfig(); //Configuração do motor do Primeiro Indexer
 
-    double desiredDistance = 2;
+    private final SparkMaxConfig indexSConfig = new SparkMaxConfig(); //COnfiguração do motor do segundo Indexer
+    
+    private final SparkMaxConfig esteiraConfig = new SparkMaxConfig(); //Configuração do motor da esteira
 
-    // === STATE MACHINE ===
-    private RobotState currenttState = RobotState.OFF; //Definição do estado atual do robô e seu controle, sendo ele "desligado"
-    private boolean lastBButton = false; //Definição da última vez que o botão B foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastAButton1 = false; //Definição da última vez que o botão A foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastAButton2 = false;
-    private boolean lastXButton = false; //Definição da última vez que o botão X foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastXButton1 = false; // NOVO: Ultima vez que o X do controle 1 foi apertado
-    private boolean lastRightTriggerAxis = false; //Definição da última vez que o botão de Gatilho Direito foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastYButton = false; //Definição da última vez que o botão Y foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastRightBumperButton = false; //Definição da última vez que o botão RB foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastLeftTriggerAxis = false; //Definição da última vez que o botão de Gatilho Esquerdo foi apertado, sendo considerado um "Falso Verdadeiro"
-    private boolean lastLeftBumprButton = false; //Definição da última vez que o botão LB foi apertado, sendo considerado um "Falso Verdadeiro"
+    //Motores direito e esquerdo, respectivamente, ambos tipo Brushed
+    private final SparkMax RightNEO1 = new SparkMax(1, MotorType.kBrushed);
+    private final SparkMax LeftNEO1 = new SparkMax(2, MotorType.kBrushed);
 
-    // === OUTROS ===
-    private final SparkMaxConfig driveConfig = new SparkMaxConfig(); //Definição da configuração dos motores de movimentação
-    private final Timer tempo = new Timer(); //Definição do tempo, funcionando para autônomo e cronômetro
-    private final Timer Delay = new Timer();
-    private final XboxController controller1 = new XboxController(0); //Definição do controle para o piloto de movimentação/1
-    private final XboxController controller2 = new XboxController(1); //Definição do controle para o piloto de funções mecânica/2
+    private final SparkMax Shooter = new SparkMax(3, MotorType.kBrushed); //Motor do Shooter
+    
+    private final SparkMax Intake = new SparkMax(4, MotorType.kBrushed); //Motor do Intake
+    
+    private final SparkMax IndexP = new SparkMax(5, MotorType.kBrushed); //Motor do Primeiro indexer
+    
+    private final SparkMax IndexS = new SparkMax(6, MotorType.kBrushless); //Motor do Segundo Indexer
 
-    // ==================== ROBOT INIT ====================
-    @Override
-    public void robotInit() { //Criação da classe "Iniciação do Robô"
 
-    // === CHOOSER ===
-        m_chooser.setDefaultOption("Default Auto", kDefaultAuto); //Definição do modo normal do auto
-        m_chooser.addOption("My Auto", kCustomAuto); //Definição do Meu Auto
-        SmartDashboard.putData("Auto choices", m_chooser); //Definição de Escolhas de Auto
+    private final SparkMax esteira = new SparkMax(8, MotorType.kBrushed); //Esteira
 
-    // === DRIVE CONFIG ===
-        driveConfig.idleMode(IdleMode.kBrake).inverted(false); //Configuração do DriveConfig, onde ele não está invertido
 
-        RightNEO1.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters); //Configuração dos parâmetros do motor direito do Drive
-        LeftNEO1.configure(driveConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters); //Configuração dos parâmetros do motor esquerdo do Drive
-
-    // === SENSOR AJ-SRR04M-2
-        Echo.setSemiPeriodMode(true); //Definição do semi período do Echo do sensor ultrassônco
-        Echo.reset(); //Definição do reset do Echo do sensor ultrassônico
-
-    // === SHOOTER ===
-        shooterConfig.idleMode(IdleMode.kCoast); //Configuração do ShooterConfig, onde ele é Coast, sem parar totalmente
-        shooter1.configure(shooterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters); //Configuração dos parâmetros do motor de Shooter do ShooterConfig
-
-        SmartDashboard.putNumber("Shooter Power", shooterPower1); //Aparição do power do shooter de longa distância no SmartDashboard, para os pilotos verem.
-
-    // === INTAKE/OUTTAKE ===
-        intakeConfig.idleMode(IdleMode.kCoast); //Configuração do Intake, onde ele é Coast, sem parar totalmente
-        intake.configure(intakeConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters); //Configuração dos parâmetros do motor de Intake do IntakeConfig
-
-    // === INDEXTER ===
-        indexterConfig.idleMode(IdleMode.kCoast); //Configuração do Indexter, onde ele é Coast, sem parar totalmente
-        indexter.configure(indexterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters); //Configuração dos parâmetros do motor de Indexter do IndexterConfig
-        indexter2.configure(indexterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters); //Configuração dos parâmetros do motor de Indexter2 do IndexterConfig
-        esteira.configure(indexterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-
-        ClawConfig.idleMode(IdleMode.kBrake);
-        Claw.configure(ClawConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
-
-        System.out.println("=== Sistema iniciado ==="); //Aparecer  no console quando o robô for ligado
-    }
-
-    public enum RobotState{ //Definição da classe RobotState
-        OFF, //Motores em 10% de potência
-        INTAKE, //Intake ligado
-        GARRAUP, //Garra para subir
-        GARRADOWN, //Garra para descer
-        SHOOTER1, //Shooter para longa distância
-        SHOOTER2, //Shooter para curta distância
-        OFFALL, //Motores em 0%
-        INDEXTER, //Indexter ligado
-        OUTTAKE, //Outtake ligado
-        AUTO_TRACKING //Modo de alinhamento e tiro automático
-    }
-
-    public double getDistanceMeters() { //Classe para pegar a distância em metros
-        Trig.set(true); //Colocar o Trig para um valor "Verdadeiro"
-        Timer.delay(0.00001); //Delay de tempo de emissão de código para 10 microssegundos
-        Trig.set(false); //Colocar o Trig para um valor "Falso Verdadeiro"
+    public Robot() {
         
-        double period = Echo.getPeriod(); //Colocar o Echo para período
-
-        double distance = (period * 343) /2; //Colocar a distância para ser divida pela metade do período multiplicado pela velocidade do som e dividido pela metade
-        return distance; //Retorna a distância
+        m_robotContainer = new RobotContainer();
     }
 
-    public void CalculateAccuracy (double getDistanceMeters, double camYaw, double joyMovement) { //Classe para Calcular a chance de acerto
-        DistanceFilter = (DistanceFilter * 0.8) + (getDistanceMeters * 0.2); //Criação do cálculo do filtro de distância somado com a distância em metros
 
-        double distanceTotal = 0;
-        if (DistanceFilter >= 1.5) {
-            double idealDistance = desiredDistance; //Distância ideal é 2 metros
-            double distanceError = Math.abs(DistanceFilter - idealDistance); //Cálculo do erro de distância
-            distanceTotal = 100 - (distanceError * 25); //Cálculo do total da distância diminuido pelos erros
-        }
-        distanceTotal = Math.max(0, Math.min(100, distanceTotal)); //Mínimo e máximo da distância 
+    public void robotInit(){
 
-        double angleTotal = 100 - (Math.abs(camYaw) * 10); //Cálculo total do ângulo diminuido pelos erros (10% por grau)
-        angleTotal = Math.max(0, Math.min(100, angleTotal)); //Mínimo e máximo do ângulo
+    // Tabela de chute: Distância (metros) -> Potência (0.0 a 1.0)
+        shotMap.put(1.0, 0.50);
+        shotMap.put(2.0, 0.70);
+        shotMap.put(3.0, 0.85); // O exemplo que você pediu (3m = 0.8)
+        shotMap.put(4.0, 0.95);
+    SmartDashboard.putData("Auto Choices", m_chooser);
 
-        double movimentTotal = 100 - (joyMovement > 0.1 ? 60 : 0); //Cálculo do total do movimento diminuido pelos erros
-        movimentTotal = Math.max(0, Math.min(100, movimentTotal)); //Mínimo e máximo do movimento
 
-        ShooterPercentage = movimentTotal * 0.2 + distanceTotal * 0.4 + angleTotal * 0.4; //Média da junção de todos os erros para cálcular a porcentagem de Shooter
+    m_chooser.setDefaultOption("Normal", kDefaultAuto);
+    m_chooser.addOption("Saída1", kCustomAuto);
+    m_chooser.addOption("Saida 2", kAuto2);
+    m_chooser.addOption("Saida 3", kAuto3);
+    m_chooser.addOption("Saida 4", kAuto4);
+    m_chooser.addOption("Saida 5", kAuto5);
+    m_chooser.addOption("Normal Esp", kAutoProtoEsp);
+    m_chooser.addOption("Saida 7", kAuto7);
+    m_chooser.addOption("Saida 8", kAuto8);
+    m_chooser.addOption("Saida 9", kAuto9); 
+    m_chooser.addOption("Saida 10", kAuto10);
+
+    SmartDashboard.putData("Auto Choices", m_chooser);
+
+    leftConfig.idleMode(IdleMode.kBrake).inverted(false);
+    rightConfig.idleMode(IdleMode.kBrake).inverted(true);
+
+
+    RightNEO1.configure(rightConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+    LeftNEO1.configure(leftConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+    shooterConfig.idleMode(IdleMode.kCoast);
+
+    Shooter.configure(shooterConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+    indexPConfig.idleMode(IdleMode.kBrake);
+
+    IndexP.configure(indexPConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+    indexSConfig.idleMode(IdleMode.kBrake);
+
+    IndexS.configure(indexSConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+    intakeConfig.idleMode(IdleMode.kCoast);
+
+    Intake.configure(intakeConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+    esteiraConfig.idleMode(IdleMode.kBrake);
+
+    esteira.configure(esteiraConfig, ResetMode.kResetSafeParameters, PersistMode.kPersistParameters);
+
+
+    }
+    
+
+    @Override
+    public void autonomousInit() {
+    //m_autonomousCommand = m_robotContainer.getAutonomousCommand();
+
+    /* 
+    if (m_autonomousCommand != null) {
+    CommandScheduler.getInstance().schedule(m_autonomousCommand);
+    }*/
+
+    m_autoSelect = m_chooser.getSelected();
+    System.out.println("Normal" + m_autoSelect);
+
+    timer.reset();
+    timer.start();
+    jaAlinhou = false; // Reseta o flag de alinhamento
+    allMotorsStop();
+
     }
 
-    // ==================== AUTONOMOUS ====================
-    @Override
-    public void autonomousInit() { //Classe do autônomo e sua iniciação
-        m_autoSelected = m_chooser.getSelected(); //Seleção do auto selecionado
-        tempo.reset(); //Reset do tempo
-        tempo.start(); //Início do tempo
+    
+    @Override 
+    public void autonomousPeriodic() {
+        double time = timer.get();
+
+        switch (m_autoSelect) {
+    case kDefaultAuto:
+    logicaNormal(time);
+    break;
+    case kCustomAuto:
+    default:
+    logicaSaida1(time);
+    break;
+    case kAuto2:
+    logicaSaida2(time);
+    break;
+    case kAuto3:
+    logicaSaida3(time);
+    break;
+    case kAuto4:
+    logicaSaida4(time);
+    break;
+    case kAuto5:
+    logicaSaida5(time);
+    break;
+    case kAutoProtoEsp:
+    logicaNormalEsp(time);
+    break;
+    case kAuto7:
+    logicaSaida7(time);
+    break;
+    case kAuto8:
+    logicaSaida8(time);
+    break;
+    case kAuto9:
+    logicaSaida9(time);
+    break;
+    case kAuto10:
+    logicaSaida10(time);
+    break;
+    }
     }
 
-    @Override
-    public void autonomousPeriodic() {} //Classe onde fica a programação do Autônomo
 
-    // ==================== TELEOP ====================
-    @Override
-    public void teleopPeriodic() { //Classe onde fica a programação do TeleOp
-
-        // === STATE MACHINE ===
-        boolean BPressed = controller2.getBButton(); //Caso o botão B seja pressionado no controle 2, será efetuado o botão B
-        boolean APressed1 = controller1.getAButton(); //Caso o botão A seja pressionado no controle 1, será efetuado o botão A
-        boolean XPressed = controller2.getXButton(); //Caso o botão X seja pressionado no controle 2, será efetuado o botão X
-        boolean XPressed1 = controller1.getXButton(); // NOVO: Botão X no Controle 1 para modo automático
-        boolean YPressed = controller1.getYButton(); //Caso o botão Y seja pressionado no controle 2, será efetuado o botão Y
-        boolean RightBumperButtonPressed = controller2.getRightBumperButton(); //Caso o botão RB seja pressionado no controle 2, será efetuado o botão rB
-        boolean LeftBumperButtonPressed = controller2.getLeftBumperButton(); //Caso o botão LB seja pressionado no controle 2, será efetuado o botão LB
-        boolean RightTriggerAxisPressed = controller2.getRightTriggerAxis() > 0.1; //Caso o Gatilho Direito seja pressionado no controle 2, será efetuado o Gatilho Direito
-        boolean LeftTriggerAxisPressed = controller2.getLeftTriggerAxis() > 0.1; //Caso o Gatilho Esquerdo seja pressionado no controle 2, será efetuado o Gatilho Esquerdo
-        boolean APressed2 = controller2.getAButton(); //Caso o botão A seja pressionado no controle 2, será efetuado o botão A
-
-        // === JOYSTICK ===
-        double eixoX = applyDeadband(-controller1.getLeftX(), 0.1);
-        double eixoY = applyDeadband(controller1.getRightY(), 0.1);
-
-        // === TELEMETRY
-        PhotonPipelineResult result = camera.getLatestResult();
-        double currentYaw = result.hasTargets() ? result.getBestTarget().getYaw() : 999;
-        double joystickSum = Math.abs(eixoX) + Math.abs(eixoY);
-
-        CalculateAccuracy(getDistanceMeters(), currentYaw, joystickSum);
-
-        // === TELEMETRY ===
-        if (XPressed1 && !lastXButton1) {
-            if (currenttState == RobotState.AUTO_TRACKING) {
-                currenttState = RobotState.OFF;
+    private void logicaNormal(double time) {
+        // 1. FASE DE POSICIONAMENTO E PRIMEIRO TIRO (0 a 6.0s)
+        if (time < 6.0) { 
+            if (time < 2.0) {
+                RightNEO1.set(-0.4); LeftNEO1.set(-0.4); 
             } else {
-                currenttState = RobotState.AUTO_TRACKING;
+                RightNEO1.set(0); LeftNEO1.set(0);  
+            }
+            Shooter.set(0.85); 
+            if (time > 2.5) { IndexS.set(0.5); }
+            if (time > 3.5) { IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        // 2. GIRA 180° PARA BUSCAR NOVAS BOLAS (6.0s a 8.0s)
+        else if (time < 8.0) { 
+            Shooter.set(0.55); 
+            IndexP.set(0); IndexS.set(0); esteira.set(0);
+            RightNEO1.set(-0.5); LeftNEO1.set(0.5); 
+        }
+        // 3. ANDA PARA FRENTE E COLETA (8.0s a 10.0s)
+        else if (time < 10.0) { 
+            RightNEO1.set(0.5); LeftNEO1.set(0.5); 
+            Intake.set(0.8); IndexP.set(0.2); esteira.set(0.2); 
+        }
+        // 4. GIRA 180° DE VOLTA (10.0s a 12.0s)
+        else if (time < 12.0) { 
+            RightNEO1.set(0.5); LeftNEO1.set(-0.5); 
+            Intake.set(0); IndexP.set(0); esteira.set(0); 
+            Shooter.set(0.95);
+        }
+        // 5. SEGUE UM POUCO PARA FRENTE ANTES DE VIRAR (12.0s a 13.0s)
+        else if (time < 13.0) {
+            RightNEO1.set(0.4); LeftNEO1.set(0.4); // Deslocamento para ganhar espaço
+        }
+        // 6. VIRA 45° PARA A ESQUERDA (13.0s a 13.7s)
+        else if (time < 13.7) {
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4); 
+        }
+        // 7. PARA E ATIRA (13.7s a 15.5s)
+        else if (time < 15.5) { 
+            RightNEO1.set(0); LeftNEO1.set(0); 
+            if (time > 14.0) { 
+                IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2);
             }
         }
-        if (currenttState == RobotState.AUTO_TRACKING) {
-            if (result.hasTargets()) {
-                double rotOutput = rotPID.calculate(currentYaw, 0);
-                if (Math.abs(currentYaw) < 0.5) rotOutput = 0;
-                rotOutput = MathUtil.clamp(rotOutput, -0.5, 0.5);
-                LeftNEO1.set(-rotOutput);
-                RightNEO1.set(rotOutput);
+        // 8. COMPENSA OS 45° PARA A DIREITA (15.5s a 16.2s)
+        else if (time < 16.2) {
+            Shooter.set(0); IndexS.set(0); IndexP.set(0); esteira.set(0);
+            RightNEO1.set(-0.4); LeftNEO1.set(0.4); 
+        }
+        // 9. CORRIDA FINAL PARA A RAMPA (16.2s a 20.0s)
+        else if (time < 20.0) {
+            RightNEO1.set(0.65); 
+            LeftNEO1.set(0.65); 
+        }
+        else { 
+            allMotorsStop(); 
+        }
+    }
+    
+    private void logicaSaida1(double time) {
+        // 1. ATIRA (0 a 6.0s)
+        if (time < 6.0) {
+            if (time < 1.5) { 
+                RightNEO1.set(-0.4); LeftNEO1.set(-0.4); // Pequena ré para alinhar
+            } else { 
+                RightNEO1.set(0); LeftNEO1.set(0);
+            }
+            
+            Shooter.set(0.85);
+            if (time > 2.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        // 2. DESLOCAMENTO LONGO PARA A TORRE (6.0s a 16.0s)
+        else if (time < 16.0) {
+            allMotorsStop();
+            // Aqui você pode colocar um giro se a torre não estiver atrás do robô
+            // Supondo que precise apenas dar ré até ela:
+            RightNEO1.set(-0.4); LeftNEO1.set(-0.4); 
+        } 
+        // 3. ESCALADA (16.0s a 20.0s)
+        else if (time < 20.0) {
+            RightNEO1.set(-0.2); // Mantém pressão contra a torre
+            LeftNEO1.set(-0.2);
+        }
+        else { 
+            allMotorsStop(); 
+        }
+    }
+
+    private void logicaSaida2(double time) {
+        if (time < 6.0) { // TIRO
+            if (time < 2.0) { RightNEO1.set(-0.3); LeftNEO1.set(-0.3); } 
+            else { RightNEO1.set(0); LeftNEO1.set(0); }
+            Shooter.set(0.85);
+            if (time > 2.5) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        else if (time < 9.0) { // GIRA PARA ALINHAR A TRASEIRA COM A TORRE
+            allMotorsStop();
+            RightNEO1.set(-0.4); LeftNEO1.set(0.4); // Ajuste o tempo se o giro for muito ou pouco
+        } 
+        else if (time < 16.0) { // RÉ ATÉ A TORRE
+            RightNEO1.set(-0.3); LeftNEO1.set(-0.3); 
+        }
+        else if (time < 20.0) { //  
+            RightNEO1.set(-0.1); LeftNEO1.set(-0.1);
+        } else { allMotorsStop(); }
+    }
+
+
+    private void logicaSaida3(double time) {
+        if (time < 6.0) { // TIRO
+            if (time < 2.0) { RightNEO1.set(-0.3); LeftNEO1.set(-0.3); }
+            else { RightNEO1.set(0); LeftNEO1.set(0); }
+            Shooter.set(0.85);
+            if (time > 2.5) { IndexS.set(0.4); IndexP.set(0.5); esteira.set(0.2); }
+        } 
+        else if (time < 8.5) { // 
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4);
+        } 
+        else if (time < 10.5) { // GIRA 90°
+            RightNEO1.set(0.4); LeftNEO1.set(0.4);
+        } 
+        else if (time < 16.0) { // RÉ FINAL ATÉ A TORRE
+            RightNEO1.set(-0.4); LeftNEO1.set(-0.4);
+        } 
+        else if (time < 20.0) { // ESCALADA
+            RightNEO1.set(-0.1); LeftNEO1.set(-0.1);
+        } else { allMotorsStop(); }
+    }
+
+    void logicaSaida4(double time){
+    // 1. ATIRAR IMEDIATAMENTE (0 a 4s)
+        if (time < 4.0) {
+            Shooter.set(0.85);
+            if (time > 1.5) { 
+                IndexS.set(0.4); // Indexer superior
+                IndexP.set(0.5); esteira.set(0.2); // Indexer primeiro e esteira juntos para evitar engasgos
+            }
+        } 
+        // 2. PRIMEIRO GIRO DE 90° (1/4 de círculo) (4 a 5s)
+        else if (time < 5.0) {
+            // Desliga tiro para poupar energia
+            Shooter.set(0.3); IndexS.set(0); IndexP.set(0); esteira.set(0);
+            
+            // Gira 90 graus (ajuste o tempo se ele girar mais ou menos que isso)
+            RightNEO1.set(-0.4); 
+            LeftNEO1.set(0.4); 
+        } 
+        // 3. VAI PARA FRENTE (5 a 7s)
+        else if (time < 7.0) {
+            RightNEO1.set(0.3); 
+            LeftNEO1.set(0.3); 
+        } 
+        // 4. SEGUNDO GIRO DE 90° (7 a 8s)
+        else if (time < 8.0) {
+            // Gira para alinhar com as bolas no chão
+            RightNEO1.set(-0.4); 
+            LeftNEO1.set(0.4); 
+        } 
+        // 5. LIGA INTAKE E VAI PARA FRENTE COLETAR (8 a 11s)
+        else if (time < 11.0) {
+            Intake.set(0.8);   // Puxa a bola
+            IndexP.set(0.4); esteira.set(0.2);  // Esteira liga para levar a bola pro fundo e liberar espaço
+            
+            RightNEO1.set(0.4); 
+            LeftNEO1.set(0.4); 
+        } 
+        // 6. DÁ RÉ NA MESMA QUANTIDADE (11 a 14s)
+        else if (time < 14.0) {
+            // Mantém o intake ligado para garantir que a bola não escape na ré
+            Intake.set(0.3); 
+            IndexP.set(0); esteira.set(0);
+            
+            // Volta (mesmo tempo que andou na fase 5, ou seja, 3 segundos)
+            RightNEO1.set(-0.4); 
+            LeftNEO1.set(-0.4); 
+        } 
+        // FINAL: SEGURANÇA
+        else {
+            allMotorsStop();
+        }
+    }
+
+    private void logicaSaida5(double time) {
+        // 1. TIRO INICIAL (0 a 3.0s)
+        if (time < 3.0) { 
+            Shooter.set(0.85);
+            if (time > 1.2) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        // 2. VIRA 90 GRAUS PARA A TRINCHEIRA (3.0s a 4.5s)
+        else if (time < 4.5) {
+            allMotorsStop(); // Limpa inércia
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4); // Vira 90°
+        } 
+        // 3. CURVA ARC TURN PARA FRENTE - COLETANDO (4.5s a 7.5s)
+        else if (time < 7.5) {
+            Intake.set(0.7); IndexP.set(0); esteira.set(0);
+            LeftNEO1.set(0.5); RightNEO1.set(0.2); // Curva aberta para frente
+        }
+        // 4. MESMA CURVA, MAS VOLTANDO DE RÉ (7.5s a 10.5s)
+        else if (time < 10.5) {
+            Intake.set(0); // Para de coletar
+            LeftNEO1.set(-0.5); RightNEO1.set(-0.2); // Ré fazendo o mesmo arco
+        }
+        // 5. VIRA 90 GRAUS DE VOLTA - APONTANDO PRO HUB (10.5s a 12.0s)
+        else if (time < 12.0) {
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4); // Giro contrário ao passo 2
+        }
+        // 6. SEGUNDO TIRO (12.0s a 15.0s)
+        else if (time < 15.0) {
+            RightNEO1.set(0); LeftNEO1.set(0);
+            Shooter.set(0.85);
+            if (time > 13.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        }
+        // 7. MANOBRA DE ESCALADA - RÉ ATÉ A TORRE (15.0s a 20.0s)
+        else if (time < 20.0) {
+            Shooter.set(0); IndexS.set(0); IndexP.set(0);
+            RightNEO1.set(-0.3); LeftNEO1.set(-0.3); // Ré para encostar a garra
+        } 
+        else { 
+            allMotorsStop(); 
+        }
+    }
+
+    private void logicaNormalEsp(double time) {
+        // 1. FASE DE POSICIONAMENTO E PRIMEIRO TIRO (0 a 6.0s)
+        if (time < 6.0) { 
+            if (time < 2.0) {
+                RightNEO1.set(-0.4); LeftNEO1.set(-0.4); 
             } else {
-                LeftNEO1.set(0); RightNEO1.set(0);
+                RightNEO1.set(0); LeftNEO1.set(0);  
             }
-        } else {
-            // === ARCADE DRIVE ===
-            double finalLeftSpeed  = clamp(eixoY - eixoX, -0.8, 0.8);
-            double finalRightSpeed = clamp(eixoY + eixoX, -0.8, 0.8);
-
-            // === SELECTIVE DRIVE ISOLATION ===
-            if (controller1.getRightBumperButton()) { finalRightSpeed = 0; }
-            if (controller1.getLeftBumperButton()) { finalLeftSpeed = 0; }
-
-            RightNEO1.set(finalRightSpeed);
-            LeftNEO1.set(finalLeftSpeed);
+            Shooter.set(0.85); 
+            if (time > 2.5) { IndexS.set(0.5); }
+            if (time > 3.5) { IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        // 2. GIRA 180° - INVERTIDO (8.0s a 10.0s)
+        // Se o original era (-0.5, 0.5), o espelhado é (0.5, -0.5)
+        else if (time < 8.0) { 
+            Shooter.set(0.55); 
+            IndexP.set(0); IndexS.set(0); esteira.set(0);
+            RightNEO1.set(0.5); LeftNEO1.set(-0.5); 
         }
-        
-        // === SHOOTER LONG DISTANCE ===
-        if (RightTriggerAxisPressed && !lastRightTriggerAxis) { //Se o Gatilho Direito do controle 2 for pressionado uma vez
-            if (currenttState == RobotState.SHOOTER1) { //Ativa o modo SHOOTER1 
-               currenttState = RobotState.OFF; //Caso seja apertado novamente, será mudado para o modo OFF
-            } else{ //Caso não seja pressionado para o modo OFF
-                currenttState = RobotState.SHOOTER1; //Modo SHOOTER1 continua ligado
-                Delay.reset();
-                Delay.start();
-            }
+        // 3. ANDA PARA FRENTE E COLETA (8.0s a 10.0s)
+        else if (time < 10.0) { 
+            RightNEO1.set(0.4); LeftNEO1.set(0.4); 
+            Intake.set(0.8); IndexP.set(0.2); esteira.set(0.2); 
         }
-
-        // === SHOOTER SHORT DISTANCE ===
-        if (RightBumperButtonPressed && !lastRightBumperButton) { //Se o botão RB do controle 2 for pressionado uma vez
-            if (currenttState == RobotState.SHOOTER2) { //Ativa o modo SHOOTER2
-                currenttState = RobotState.OFF; //Caso seja apertado novamente, será mudado para o modo OFF
-            } else{ //Caso não seja pressionado para o modo OFF
-                currenttState = RobotState.SHOOTER2; //Modo SHOOTER2 continua ligado
-                Delay.reset();
-                Delay.start();
-            }
+        // 4. GIRA 180° DE VOLTA - INVERTIDO
+        else if (time < 12.0) { 
+            RightNEO1.set(-0.5); LeftNEO1.set(0.5); 
+            Intake.set(0); IndexP.set(0); esteira.set(0); 
+            Shooter.set(0.95);
         }
-      
-        // === INDEXTER ===
-        if (BPressed && !lastBButton) { //Caso o botão B do controle 2 for pressionado uma vez
-          if (currenttState == RobotState.INDEXTER) { //Ativa o modo INDEXTER
-            currenttState = RobotState.OFF; //Caso seja apertado novamente, será mudado para o modo OFF
-          } else{ //Caso não seja pressionado para o modo OFF
-            currenttState = RobotState.INDEXTER; //Modo INDEXTER continua ligado
-          }  
+        // 5. SEGUE UM POUCO PARA FRENTE (12.0s a 13.0s)
+        else if (time < 13.0) {
+            RightNEO1.set(0.4); LeftNEO1.set(0.4); 
         }
-
-        // === INTAKE/OUTTAKE ===
-        if (LeftBumperButtonPressed && !lastLeftBumprButton) { //Caso o botão LB seja pressionado uma vez
-            if (currenttState == RobotState.INTAKE) { //Ativa o modo INTAKE
-               currenttState = RobotState.OFF; //Caso seja apertado novamente, será mudado para o modo OFF
-            } else { //Caso não seja pressionado para o modo OFF
-                currenttState = RobotState.INTAKE; //Modo INTAKE continua ligado
+        // 6. VIRA 45° PARA A DIREITA (Espelhado da Esquerda)
+        else if (time < 13.7) {
+            RightNEO1.set(-0.4); LeftNEO1.set(0.4); 
+        }
+        // 7. PARA E ATIRA (13.7s a 15.5s)
+        else if (time < 15.5) { 
+            RightNEO1.set(0); LeftNEO1.set(0); 
+            if (time > 14.0) { 
+                IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2);
             }
         }
-        if (XPressed && !lastXButton) { //Caso o botão X seja pressionado uma vez
-            if (currenttState == RobotState.OUTTAKE) { //Ativa o modo OUTTAKE
-                currenttState = RobotState.OFF; //Caso seja apertado novamente, será mudado para o modo OFF
-            } else{ //Caso não seja pressionado para o modo OFF
-                currenttState = RobotState.OUTTAKE; //Modo OUTTAKE continua ligado
-            }
+        // 8. COMPENSA OS 45° PARA A ESQUERDA (Volta ao eixo)
+        else if (time < 16.2) {
+            Shooter.set(0); IndexS.set(0); IndexP.set(0); esteira.set(0);
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4); 
+        }
+        // 9. CORRIDA FINAL PARA A RAMPA (16.2s a 20.0s)
+        else if (time < 20.0) {
+            RightNEO1.set(0.65); 
+            LeftNEO1.set(0.65); 
+        }
+        else { 
+            allMotorsStop(); 
+        }
+    }
+
+    private void logicaSaida7(double time) {
+        if (time < 3.0) { // 1. Ré e atira inicial
+            if(time < 1.0) { RightNEO1.set(-0.3); LeftNEO1.set(-0.3); }
+
+            else 
+            { RightNEO1.set(0); LeftNEO1.set(0); }
+            Shooter.set(0.85);
+
+            if(time > 1.5) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        else if (time < 4.5) { // 2. Vira para o HP (Giro de ~90°)
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4); Shooter.set(0.3);
+        } 
+        else if (time < 8.0) { // 3. Vai até o HP e Coleta
+            Intake.set(0.8); IndexP.set(0.4); esteira.set(0.2);
+            RightNEO1.set(0.4); LeftNEO1.set(0.4);
+        } 
+        else if (time < 11.0) { // 4. Dá ré voltando
+            Intake.set(0); IndexP.set(0); esteira.set(0);
+            RightNEO1.set(-0.4); LeftNEO1.set(-0.4);
+        } 
+        else if (time < 12.5) { // 5. Vira para o Hub (Direita)
+            RightNEO1.set(-0.4); LeftNEO1.set(0.4);
+        } 
+        else if (time < 16.0) { // 6. Atira segunda carga
+            RightNEO1.set(0); LeftNEO1.set(0);
+            Shooter.set(0.85);
+            if(time > 14.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } 
+        /*else if (time < 20.0) { // 7. ESCALADA (Traseira na torre)
+            Shooter.set(0); IndexS.set(0); IndexP.set(0); esteira.set(0);
+            RightNEO1.set(-0.3); LeftNEO1.set(-0.3); // Ré final encostando
+        }  */
+        else { allMotorsStop(); }
+    }
+
+        private void logicaSaida8(double time) {
+            if (time < 3.0) { // Atira parado
+                Shooter.set(0.85);
+                if (time > 1.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+            } else if (time < 4.0) { // Vira 90 Graus Direita
+                allMotorsStop();
+                RightNEO1.set(-0.4); LeftNEO1.set(0.4);
+            } else if (time < 5.0) { // Frente 
+                RightNEO1.set(0.3); LeftNEO1.set(0.3);
+            } else if (time < 7.5) { // CURVA COAST MODE: Coletando
+                Intake.set(0.7); IndexP.set(0.4); esteira.set(0.2);
+                // Força no esquerdo, "Coast" no direito enviando quase 0
+                LeftNEO1.set(0.4); RightNEO1.set(0.0); 
+            } else if (time < 9.5) { // Dá ré
+                Intake.set(0); IndexP.set(0); esteira.set(0);
+                RightNEO1.set(-0.3); LeftNEO1.set(-0.3);
+            } else if (time < 10.5) { // Vira Esquerda (Subir rampa)
+                RightNEO1.set(0.4); LeftNEO1.set(-0.4);
+            } else if (time < 12.5) { // Frente subindo rampa
+                RightNEO1.set(0.4); LeftNEO1.set(0.4);
+            } else if (time < 13.5) { // Vira para o Hub (Esquerda)
+                RightNEO1.set(0.4); LeftNEO1.set(-0.4);
+            } else if (time < 15.0) { // Atira
+                RightNEO1.set(0); LeftNEO1.set(0);
+                Shooter.set(0.85);
+                if(time > 14.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+            } else { allMotorsStop(); }
         }
 
-        // === OFFALL ===
-        if (APressed2 && !lastAButton2) { //Caso o botão A do controle 2 seja apertado uma vez
-            if (currenttState == RobotState.OFFALL) { //Ativa o modo OFFALL
-                currenttState = RobotState.OFF; //Caso seja apertado novamnte, será mudado para o modo OFF
-            } else { //Caso não seja pressionado para o modo OFF
-                currenttState = RobotState.OFFALL; //Modo OFFALL continua ligado
-            }
-        }
+    private void logicaSaida9 (double time) {
+        if (time < 3.0) { // Atira parado
+            Shooter.set(0.85);
+            if (time > 1.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } else if (time < 5.0) { // Giro e posicionamento
+            allMotorsStop();
+            RightNEO1.set(0.4); LeftNEO1.set(-0.4);
+        } else if (time < 9.0) { // Curva Coast e Coleta
+            Intake.set(0.7); IndexP.set(0.4); esteira.set(0.2);
+            LeftNEO1.set(0.4); RightNEO1.set(0.1); 
+        } else if (time < 12.0) { // Sobe rampa
+            Intake.set(0);
+            RightNEO1.set(0.5); LeftNEO1.set(0.5);
+        } else if (time < 16.0) { // Atira no Hub
+            RightNEO1.set(0); LeftNEO1.set(0);
+            Shooter.set(0.85);
+            if(time > 14.0) { IndexS.set(0.5); IndexP.set(0.4); esteira.set(0.2); }
+        } else if (time < 20.0) { // ESCALADA
+            Shooter.set(0); IndexS.set(0); 
+            RightNEO1.set(-0.3); LeftNEO1.set(-0.3); 
+        } else { allMotorsStop(); }
+    }
 
-        // === GARRA E DERIVATIVO ===
-        if (controller1.getRightTriggerAxis() > 0.1) {
-            ClawTargetPower = 1.0;
-        }
-        else if (controller1.getLeftTriggerAxis() > 0.1) {
-            ClawTargetPower = -0.7;
+
+    private void logicaSaida10(double time) {
+        if (time < 2.0) { // 1. Sai da parede
+            Shooter.set(0.3);
+            RightNEO1.set(-0.3); LeftNEO1.set(-0.3);
+        } 
+        else if (time < 16.0) { // 2. Mira e Atira via Câmera
+            boolean prontoParaAtirar = prepararDisparo(time); 
+
+            if (prontoParaAtirar) {
+                IndexS.set(0.6); 
+                if (time > 5.0) { IndexP.set(0.5); esteira.set(0.2); }
+            } else {
+                IndexS.set(0); IndexP.set(0);
+            }
+        } 
+        else if (time < 20.0) { // 3. ESCALADA (Pós-mira)
+            allMotorsStop();
+            // Como o prepararDisparo termina apontando a traseira pro Hub...
+            RightNEO1.set(-0.3); LeftNEO1.set(-0.3); // Ré até a torre
         }
         else {
-            ClawTargetPower = 0;
+            allMotorsStop();
         }
-        double derivative = ClawTargetPower - ClawLastPower;
-        double output = ClawTargetPower - (kD_Claw * derivative);
-
-        output = MathUtil.clamp(output, -1.0, 1.0);
-
-        Claw.set(output);
-        ClawLastPower = output;
-        
-        // === UPDATE BUTTONS STATES ===
-        lastBButton = BPressed; //Atualiza a última vez que o botão B foi apertado
-        lastAButton1 = APressed1; //Atualiza a última vez que o botão A do controle 1 foi apertado
-        lastXButton1 = XPressed1; //Atualiza a última vez que o botão X do controle 1 foi apertado
-        lastRightTriggerAxis = RightTriggerAxisPressed; //Atualiza a última vez que o Gatilho Direito foi apertado
-        lastXButton = XPressed; //Atualiza a última vez que o botão X foi apertado
-        lastYButton = YPressed; //Atualiza a última vez que o botão Y foi apertado
-        lastLeftBumprButton = LeftBumperButtonPressed; //Atualiza a última vez que o botão LB foi apertado
-        lastRightBumperButton = RightBumperButtonPressed; //Atualiza a última vez que o botão RB foi apertado
-        lastLeftTriggerAxis = LeftTriggerAxisPressed; //Atualiza a última vez que o Gatilho Esquerdo foi apertado
-        lastAButton2 = APressed2; //Atualiza a última vez que o botão A foi apertado
-
-        switch (currenttState) { //Troca de estado atual da funções
-            case AUTO_TRACKING:
-                if (ShooterPercentage > 85) {
-                    shooter1.set(shooterPower2);
-                    indexter.set(-0.35); 
-                    indexter2.set(0.35); 
-                    esteira.set(-0.4);
-                } else {
-                    shooter1.set(0); 
-                    indexter.set(0); 
-                    indexter2.set(0.2); 
-                    esteira.set(0);
-                }
-                break;
-
-            case OFF: //Definição da classe OFF e suas funções
-                shooter1.set(0.25); //Motor do shooter com potência de 10%
-                indexter.set(0); //Motor do indexter do lado esquerdo com potência de 10%
-                intake.set(0.2); //Motor do intake com potência de 10%
-                indexter2.set(0); //Motor do indexter superior com potência de 10%
-                esteira.set(0);
-                break; //Termino da classe OFF e suas funções
-
-            case SHOOTER1: //Definição da classe SHOOTER1 e suas funções
-                shooter1.set(shooterPower1); //Potência do motor do shooter sendo a correspondente com a ShooterPower1
-                if (Delay.get() >= 1.0)  {
-                indexter.set(-0.3); //Motor do indexter do lado esquerdo com potência de 38%
-                indexter2.set(0.3); //Motor do indexter superior com potência de 35%, sendo inverso dos outros
-                esteira.set(0.2);
-                } else{
-                indexter.set(0); //Motor do indexter do lado esquerdo com potência de 38%
-                indexter2.set(0); //Motor do indexter superior com potência de 35%, sendo inverso dos outros
-                esteira.set(0);
-                }
-                intake.set(0.2);
-                break; //Termino da classe SHOOTER1 e suas funções
-
-            case SHOOTER2: //Definição da classe SHOOTER2  e suas funções
-            shooter1.set(shooterPower2); //Potência do motor do shooter sendo a correspondente com a shooterPower2
-            if (Delay.get() >= 1.0) {
-                indexter.set(-0.3); //Motor indexter do lado esquerdo com potência de 38%
-                indexter2.set(0.3); //Motor do indexter superior com potência de 35%, sendo inverso dos outros
-                esteira.set(0.2);
-            } else{
-                indexter.set(0); //Motor indexter do lado esquerdo com potência de 38%
-                indexter2.set(0); //Motor do indexter superior com potência de 35%, sendo inverso dos outros
-                esteira.set(0);
-            }
-                intake.set(0.2);
-                break; //Termino da classe SHOOTER2 e suas funções
-
-            case INTAKE: //Definição da classe INTAKE e suas funções
-                shooter1.set(0.25); //Potência do motor do shooter sendo 0%
-                indexter.set(0); //Potência do motor do indexter do lado esquerdo sendo 20%
-                indexter2.set(0); //Potênca do motor do indexter superior sendo 0%
-                intake.set(0.8); //Potência do motor do intake sendo 50%
-                esteira.set(0.2);
-                break;
-
-            case OFFALL:
-                shooter1.set(0); 
-                indexter.set(0); 
-                indexter2.set(0); 
-                intake.set(0); 
-                esteira.set(0);
-                break;
-
-            case OUTTAKE:
-                shooter1.set(0.25); 
-                indexter.set(0); 
-                intake.set(-0.6); 
-                indexter2.set(0.2); 
-                esteira.set(0);
-                break;
-            
-            default:
-                break;
-        }
-
-        // === SHOOTER PERCENTAGE DASHBOARD ===
-        SmartDashboard.putNumber("Distancia (m)", getDistanceMeters());
-        SmartDashboard.putNumber("Chance de Acerto %", ShooterPercentage);
-        SmartDashboard.putBoolean("Pode Atirar", ShooterPercentage > 85);
     }
-  
-    @Override public void teleopInit() {}
-    private double applyDeadband(double val, double lim) { return (Math.abs(val) < lim ? 0 : val); }
-    private double clamp(double v, double min, double max) { return Math.max(min, Math.min(max, v)); }
 
-    // ==================== VAZIO ====================
-    @Override public void disabledInit() {}
-    @Override public void disabledPeriodic() {}
-    @Override public void testInit() {}
-    @Override public void testPeriodic() {}
-    @Override public void simulationInit() {}
-    @Override public void simulationPeriodic() {}
-}
+
+
+    @Override
+    public void teleopPeriodic() {}
+
+    private void allMotorsStop() {
+            RightNEO1.set(0); LeftNEO1.set(0);
+            Shooter.set(0); Intake.set(0);
+            IndexP.set(0); IndexS.set(0);
+            esteira.set(0);
+        }
+
+
+    ///////////////VAZIO//////////////////
+    @Override
+    public void testInit() {}
+    @Override
+    public void testPeriodic() {}
+    @Override
+    public void simulationInit() {}
+    @Override
+    public void simulationPeriodic() {}
+    @Override
+    public void robotPeriodic() {}
+    @Override
+    public void disabledInit() {}
+    @Override
+    public void disabledPeriodic() {}
+
+
+    ///////////|Telemtria|\\\\\\\\\\\
+    private boolean prepararDisparo(double time) {
+        var result = camera.getLatestResult();
+        
+        // Detecta a aliança atual para filtrar as Tags
+        var alliance = DriverStation.getAlliance();
+        int[] tagsAlvo = (alliance.isPresent() && alliance.get() == Alliance.Red) 
+                        ? new int[]{3, 4, 7} : new int[]{1, 2, 6};
+
+        if (result.hasTargets()) {
+            PhotonTrackedTarget targetDesejado = null;
+
+            for (var t : result.getTargets()) {
+                if (ehTagDoMeuHub(t.getFiducialId(), tagsAlvo)) {
+                    if (targetDesejado == null || Math.abs(t.getYaw()) < Math.abs(targetDesejado.getYaw())) {
+                        targetDesejado = t;
+                    }
+                }
+            }
+
+            if (targetDesejado != null) {
+                double yaw = targetDesejado.getYaw();
+                
+                if (Math.abs(yaw) > 1.5) { 
+                    RightNEO1.set(yaw * 0.035);
+                    LeftNEO1.set(-(yaw * 0.035));
+                    return false; 
+                } else {
+                    RightNEO1.set(0); LeftNEO1.set(0);
+                    
+                    // CÁLCULO DE DISTÂNCIA E POTÊNCIA
+                    double distancia = PhotonUtils.calculateDistanceToTargetMeters(
+                        ALTURA_CAMERA_METROS, ALTURA_HUB_METROS,
+                        ANGULO_MONTAGEM_RADIANOS, Units.degreesToRadians(targetDesejado.getPitch())
+                    );
+
+                    double forcaCerta = shotMap.get(distancia); 
+                    Shooter.set(forcaCerta > 0 ? forcaCerta : 0.85);
+                    return true; 
+                }
+            }
+        }
+        
+        RightNEO1.set(0.2); LeftNEO1.set(-0.2);
+        return false;
+    }
+
+    private boolean ehTagDoMeuHub(int id, int[] listaHub) {
+        for (int idAlvo : listaHub) {
+            if (id == idAlvo) {
+                return true;
+            }
+        }
+        return false;
+    }
+    }
